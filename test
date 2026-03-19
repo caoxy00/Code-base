@@ -1,0 +1,194 @@
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(ggsignif)
+library(ggprism)
+setwd("D:\\稻油系统\\油菜产量差及最适播期\\Data")
+data = read_xlsx("D:\\稻油系统\\油菜产量差及最适播期\\Data\\Cold stress index.xlsx",sheet=1)
+
+plot_box_risk <- function(data, y_var, y_label) {
+  
+  color <- c(
+    "Low" = "#c8605A",
+    "Medium" = "#E7BF25",
+    "High" = "#83A8D6"
+  )
+  
+  data2 <- data %>%
+    mutate(
+      Classification = factor(`Cold stress region`,
+                              levels = c("Low", "Medium", "High"))
+    )
+  
+  y_quo  <- rlang::enquo(y_var)
+  y_name <- rlang::as_name(y_quo)
+  y_vals <- data2[[y_name]]
+  
+  y_max <- max(y_vals, na.rm = TRUE)
+  y_min <- min(y_vals, na.rm = TRUE)
+  y_range <- y_max - y_min
+  if (y_range == 0) y_range <- abs(y_max) * 0.1 + 1
+  
+  p <- ggplot(data2, aes(x = Classification,
+                         y = .data[[y_name]],
+                         fill = Classification)) +
+    geom_boxplot(alpha = 0.7) +
+    geom_jitter(aes(color = Classification),
+                width = 0.15,
+                size = 5,
+                alpha = 0.25,
+                shape = 20,
+                stroke = 0.5) +
+    stat_summary(fun = mean,
+                 geom = "crossbar",
+                 width = 0.6,
+                 linetype = "dashed",
+                 color = "black",
+                 linewidth = 0.5) +
+    geom_signif(
+      comparisons = list(
+        c("Low", "Medium"),
+        c("Low", "High"),
+        c("Medium", "High")
+      ),
+      map_signif_level = TRUE,
+      test = t.test,
+      y_position = c(
+        y_max + y_range * 0.08,
+        y_max + y_range * 0.16,
+        y_max + y_range * 0.24
+      ),
+      tip_length = c(0.02, 0.02),
+      size = 0.8,
+      color = "black",
+      textsize = 5
+    ) +
+    labs(x = "Risk level",
+         y = y_label) +
+    theme_prism(
+      palette = "candy_bright",
+      base_fontface = "plain",
+      base_family = "serif",
+      base_size = 16,
+      base_line_size = 0.8,
+      axis_text_angle = 0
+    ) +
+    scale_fill_manual(values = color) +
+    scale_color_manual(values = color) +
+    theme(legend.position = "none")
+  
+  return(p)
+}
+
+p1 <- plot_box_risk(data, Yw, "Yield potential (kg/ha)")
+p2 <- plot_box_risk(data, Ya, "Actual yield (kg/ha)")
+p3 <- plot_box_risk(data, Re_Yg, "Relative yield gap (%)")
+p4 <- plot_box_risk(
+  data,`yield loss rate ABS`,"Relative yield loss (kg/(ha*d))")
+
+p5 <- plot_box_risk(data, `Suitable sowing start DOY`, "Start date (DOY)")
+p6 <- plot_box_risk(
+  data,range_length,"Duration (d)")
+
+p7 <- plot_box_risk(data, `mean_effective_heat (before winter)`, "AT before winter")
+p8 <- plot_box_risk(
+  data,`mean_effective_heat (growth season)`,"AT whole season")
+
+p9 <- plot_box_risk(
+  data,`total_radiation (growth season)`,"Radiation whole season")
+
+
+windows()
+combined_plot <- p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9 +
+  plot_layout(ncol = 3) +   # 两列
+  plot_annotation(tag_levels = "a")
+
+combined_plot
+
+ggsave("Risk level_lowercase_significant.jpg", 
+       plot = combined_plot,
+       width =18,   # 图片宽度（英寸）
+       height = 15,   # 图片高度（英寸）
+       dpi = 150)    # 分辨率
+
+
+windows()
+plot_lm <- function(data, y_var, y_label) {
+  
+  y_quo  <- rlang::enquo(y_var)
+  y_name <- rlang::as_name(y_quo)
+  
+  # 建立模型
+  formula <- as.formula(paste0("Yw ~ `", y_name, "`"))
+  model <- lm(formula, data = data)
+  
+  # 提取统计量
+  r2 <- summary(model)$r.squared
+  p  <- summary(model)$coefficients[2, 4]
+  intercept <- coef(model)[1]
+  slope <- coef(model)[2]
+  
+  # 构造标签
+  p_label <- ifelse(p < 0.01, "p < 0.01", "p > 0.01")
+  
+  label <- paste0(
+    #"y = ", round(slope, 2), "x + ", round(intercept, 1),
+    "\nR² = ", round(r2, 2),
+    "\n", p_label
+  )
+  
+
+  # 绘图
+  p_plot <- ggplot(data, aes(x =Yw , y = .data[[y_name]])) +
+    geom_point(size = 3, alpha = 0.6) +
+    geom_smooth(method = "lm",
+                color = "red",
+                se = TRUE) +
+    annotate("text",
+             #x = max(data$Yw, na.rm = TRUE),
+             #y = max(data[[y_name]], na.rm = TRUE),
+             x = Inf,
+             y = Inf,
+             label = label,
+             hjust = 1.2, vjust =0.8,
+             size = 7) +
+    theme_bw() +
+    labs(x ="Yield potential (kg/ha)" ,
+         y = y_label)+
+    theme(
+      axis.title.x = element_text(size = 16),
+      axis.title.y = element_text(size = 16),
+      axis.text.x = element_text(size = 14),
+      axis.text.y = element_text(size = 14)
+    )
+  
+  return(p_plot)
+}
+
+AT_whole = plot_lm(data, `mean_effective_heat (growth season)`, 
+                   "AT of growth season")
+
+AT_winter = plot_lm(data, `mean_effective_heat (before winter)`, 
+                   "AT before winter")
+
+radiation <- plot_lm(data, `total_radiation (growth season)`, 
+               "Radiation of growth season")
+
+cold_stress <- plot_lm(data, Cold_accT0, 
+                     "Cold risk index")
+
+windows()
+combined_plot <- AT_whole + AT_winter + radiation + cold_stress +
+  plot_layout(ncol = 2) +   # 两列
+  plot_annotation(tag_levels = "a")&
+  theme(plot.tag = element_text(size = 20))
+
+combined_plot
+
+ggsave("Correlation.jpg", 
+       plot = combined_plot,
+       width =10,   # 图片宽度（英寸）
+       height = 10,   # 图片高度（英寸）
+       dpi = 150)    # 分辨率
